@@ -1,0 +1,169 @@
+variables:
+  # maven option to clean the generated target folder.
+  MAVEN_CLEAN_OPT: "clean"
+
+  # generated WAR file name by maven command "mvn package".
+  GENERATED_WAR_FILE_NAME: "csci5308_test.war"
+
+  # target folder name where all build related artifacts are stored/downloaded.
+  TARGET_FOLDER_NAME: "target"
+
+stages:
+  # compiles this application.
+  - compile
+
+  # tests this application.
+  - test
+
+  # builds this application.
+  - build
+
+  # Quality Analysis
+  - code-quality
+
+  # deploy this application on heroku.
+  - deploy
+
+frontend-compile:
+  stage: compile
+  tags:
+    - dalfcs_docker_autoscale
+  image: node:16.14.2
+  before_script:
+    - node -v
+  script:
+    - echo "compiling frontend application"
+    - node -v
+    - cd frontend
+    - npm install
+    - echo "completed compiling frontend application"
+  rules:
+    - changes:
+        - frontend/**/*
+
+backend-compile:
+  stage: compile
+  tags:
+    - ugrad
+  image: maven:3-jdk-11
+  script:
+    - echo "compiling backend application"
+    - cd backend
+    - mvn clean compile
+    - echo "completed compiling backend application"
+  rules:
+    - changes:
+        - backend/**/*
+
+backend-test:
+  stage: test
+  tags:
+    - ugrad
+  image: maven:3-jdk-11
+  script:
+    - echo "testing backend application"
+    - cd backend
+    - mvn test
+    - echo "backend application has been tested"
+  rules:
+    - changes:
+        - backend/**/*
+
+frontend-build:
+  stage: build
+  tags:
+    - dalfcs_docker_autoscale
+  image: node:16.14.2
+  script:
+    - echo "building frontend application"
+    - cd frontend
+    - npm install
+    - npm run build
+    - echo "frontend application has been built"
+  rules:
+    - changes:
+        - frontend/**/*
+  artifacts:
+    paths:
+      - public
+
+backend-build:
+  stage: build
+  tags:
+    - ugrad
+  image: maven:3-jdk-11
+  script:
+    - echo "building backend application"
+    - cd backend
+    - mvn package
+    - echo "backend application has been built"
+  rules:
+    - changes:
+        - backend/**/*
+  artifacts:
+    when: on_success
+    paths:
+      - $TARGET_FOLDER_NAME/*.war
+
+code-quality:
+  stage: code-quality
+  image: maven:3-jdk-11
+  variables:
+    UPLOAD_QUALITY_REPORT: 'curl -X PUT -H "Authorization: Token $QSCORED_API_KEY" + -H "username:sr231438@dal.ca" -H "Content-Type:   application/xml" --url "https://qscored.com/api/upload/file.xml?is_open_access=off&version=$CI_PIPELINE_IID&project_name=Smarticles" -F "file=@DesigniteAnalysis.xml"'
+
+  before_script:
+    - apt-get update
+    - apt-get install -y wget curl
+    - wget -O DesigniteJava.jar https://www.dropbox.com/s/mwizkj8uhplz4x3/DesigniteJava.jar?dl=1
+  script:
+    - cd backend
+    - java -jar ./../DesigniteJava.jar -i ./ -o code-quality/ -f XML
+    - ls -l
+    - ls code-quality
+    - cd code-quality
+    - eval "$UPLOAD_QUALITY_REPORT"
+    - echo "$UPLOAD_QUALITY_REPORT"
+  only:
+    refs:
+      - main
+    changes:
+      - backend/**/*
+
+frontend-deploy:
+  stage: deploy
+  image: ruby:latest
+  tags:
+    - dalfcs_docker_autoscale
+  script:
+    - echo "deploying frontend application"
+    - cd frontend
+    - rm -f package-lock.json
+    - apt-get update -qy
+    - apt-get install -y ruby-dev
+    - gem install dpl
+    - dpl --provider=heroku --app=$HEROKU_FE_APP_NAME --api-key=$HEROKU_FE_APP_KEY
+    - echo "frontend application has been built"
+  only:
+    refs:
+      - main
+    changes:
+      - frontend/**/*
+
+backend-deploy:
+  stage: deploy
+  image: ruby:latest
+  tags:
+    - dalfcs_docker_autoscale
+  script:
+    - echo "deploying backend application"
+    - cd backend
+    - apt-get update -qy
+    - apt-get install -y ruby-dev
+    - gem install dpl
+    - dpl --provider=heroku --app=$HEROKU_APP_NAME --api-key=$HEROKU_KEY
+    - echo "backend application has been built"
+  only:
+    refs:
+      - main
+    changes:
+      - backend/**/*
